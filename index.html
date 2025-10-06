@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QR Lasergame</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
         * {
             margin: 0;
@@ -474,10 +474,10 @@
         <div id="registerScreen" class="card hidden">
             <h2 style="margin-bottom: 25px;">📱 Scan je EIGEN QR Code</h2>
             <p style="margin-bottom: 20px; color: rgba(255,255,255,0.8); text-align: center;">
-                Scan de QR code die op JOUW rug hangt om je aan te melden
+                Richt de camera op de QR code die op JOUW rug hangt
             </p>
             <div style="background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-size: 0.9em;">
-                <div id="scanDebugReg">Status: Camera laden...</div>
+                <div id="scanDebugReg">Wachten op camera...</div>
             </div>
             <div id="videoContainer">
                 <video id="videoReg" autoplay playsinline muted></video>
@@ -528,15 +528,18 @@
         </div>
 
         <div id="scanScreen" class="card hidden">
-            <h2 style="margin-bottom: 20px; text-align: center;">🎯 Scan een tegenstander!</h2>
+            <h2 style="margin-bottom: 20px; text-align: center;">🎯 Scan Tegenstander!</h2>
+            <p style="margin-bottom: 20px; color: rgba(255,255,255,0.8); text-align: center;">
+                Richt de camera op de QR code op de rug van een tegenstander
+            </p>
+            <div style="background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-size: 0.9em;">
+                <div id="scanDebugTarget">Wachten op camera...</div>
+            </div>
             <div id="videoContainer">
                 <video id="video" autoplay playsinline muted></video>
                 <div class="scan-overlay"></div>
             </div>
             <canvas id="canvas"></canvas>
-            <div style="text-align: center; margin-top: 20px; font-size: 1.1em; color: rgba(255,255,255,0.8);">
-                Scan de QR code op de rug van een tegenstander!
-            </div>
             <button class="btn btn-secondary" onclick="stopScanning()" style="margin-top: 20px;">← Stop Scannen</button>
         </div>
 
@@ -584,7 +587,8 @@
             scanning: false,
             cooldownActive: false,
             cooldownInterval: null,
-            registeringNumber: null
+            registeringNumber: null,
+            scoreboardInterval: null
         };
 
         function getTeam(number) {
@@ -666,7 +670,10 @@
             } else if (mode === 'admin') {
                 showScreen('adminScreen');
                 refreshScoreboard();
-                setInterval(refreshScoreboard, 3000);
+                if (gameState.scoreboardInterval) {
+                    clearInterval(gameState.scoreboardInterval);
+                }
+                gameState.scoreboardInterval = setInterval(refreshScoreboard, 2000);
             } else if (mode === 'print') {
                 generateQRCodes();
                 showScreen('printScreen');
@@ -691,6 +698,10 @@
             }
             if (gameState.registerScanning) {
                 stopRegistration();
+            }
+            if (gameState.scoreboardInterval) {
+                clearInterval(gameState.scoreboardInterval);
+                gameState.scoreboardInterval = null;
             }
             showScreen('modeScreen');
         }
@@ -787,13 +798,49 @@
         }
 
         function stopRegistration() {
-            gameState.registerScanning = false;
-            var video = document.getElementById('videoReg');
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(function(track) {
-                    track.stop();
-                });
+            if (gameState.codeReader) {
+                gameState.codeReader.reset();
             }
+            gameState.registerScanning = false;
+            showScreen('modeScreen');
+        }
+
+        function startScanning() {
+            if (gameState.cooldownActive) {
+                alert('Je bent in cooldown! Wacht tot je weer kunt scannen.');
+                return;
+            }
+
+            showScreen('scanScreen');
+            document.getElementById('scanDebugTarget').textContent = 'Camera starten...';
+            
+            var video = document.getElementById('video');
+            var codeReader = new ZXing.BrowserQRCodeReader();
+
+            codeReader.decodeFromVideoDevice(null, 'video', function(result, err) {
+                if (result) {
+                    document.getElementById('scanDebugTarget').textContent = 'QR gevonden: ' + result.text;
+                    if (result.text.indexOf('PLAYER_') === 0) {
+                        codeReader.reset();
+                        handleScan(result.text);
+                    } else {
+                        document.getElementById('scanDebugTarget').textContent = 'Ongeldige QR - niet van dit spel';
+                    }
+                }
+                if (err && !(err instanceof ZXing.NotFoundException)) {
+                    console.error(err);
+                    document.getElementById('scanDebugTarget').textContent = 'Error: ' + err;
+                }
+            }).then(function() {
+                document.getElementById('scanDebugTarget').textContent = 'Camera actief! Scan tegenstander...';
+            }).catch(function(err) {
+                console.error(err);
+                document.getElementById('scanDebugTarget').textContent = 'Camera fout: ' + err;
+                alert('Camera toegang geweigerd: ' + err);
+                showScreen('playerGameScreen');
+            });
+
+            gameState.targetCodeReader = codeReader;
         }
 
         function confirmRegistration() {
@@ -847,71 +894,36 @@
             }, 4000);
         }
 
-        function startScanning() {
-            if (gameState.cooldownActive) {
-                alert('Je bent in cooldown! Wacht tot je weer kunt scannen.');
-                return;
-            }
+        function startRegistration() {
+            showScreen('registerScreen');
+            document.getElementById('scanDebugReg').textContent = 'Camera starten...';
+            
+            var video = document.getElementById('videoReg');
+            var codeReader = new ZXing.BrowserQRCodeReader();
 
-            showScreen('scanScreen');
-            var video = document.getElementById('video');
-            var canvas = document.getElementById('canvas');
-            var ctx = canvas.getContext('2d');
-
-            gameState.scanning = true;
-
-            navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    facingMode: { exact: 'environment' }
-                } 
-            }).catch(function() {
-                return navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' }
-                });
-            }).catch(function() {
-                return navigator.mediaDevices.getUserMedia({ 
-                    video: true
-                });
-            }).then(function(stream) {
-                video.srcObject = stream;
-                video.play();
-                scan();
-            }).catch(function(err) {
-                alert('Camera toegang geweigerd');
-                showScreen('playerGameScreen');
-            });
-
-            function scan() {
-                if (!gameState.scanning) return;
-
-                if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    
-                    if (canvas.width > 0 && canvas.height > 0) {
-                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                        
-                        try {
-                            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                            var code = jsQR(imageData.data, imageData.width, imageData.height, {
-                                inversionAttempts: "dontInvert"
-                            });
-                            
-                            if (code && code.data) {
-                                console.log('QR gevonden:', code.data);
-                                if (code.data.indexOf('PLAYER_') === 0) {
-                                    handleScan(code.data);
-                                    return;
-                                }
-                            }
-                        } catch(e) {
-                            console.error('Scan error:', e);
-                        }
+            codeReader.decodeFromVideoDevice(null, 'videoReg', function(result, err) {
+                if (result) {
+                    document.getElementById('scanDebugReg').textContent = 'QR gevonden: ' + result.text;
+                    if (result.text.indexOf('PLAYER_') === 0) {
+                        codeReader.reset();
+                        handleRegistrationScan(result.text);
+                    } else {
+                        document.getElementById('scanDebugReg').textContent = 'Ongeldige QR - niet van dit spel';
                     }
                 }
-                
-                requestAnimationFrame(scan);
-            }
+                if (err && !(err instanceof ZXing.NotFoundException)) {
+                    console.error(err);
+                    document.getElementById('scanDebugReg').textContent = 'Error: ' + err;
+                }
+            }).then(function() {
+                document.getElementById('scanDebugReg').textContent = 'Camera actief! Richt op je QR code...';
+            }).catch(function(err) {
+                console.error(err);
+                document.getElementById('scanDebugReg').textContent = 'Camera fout: ' + err;
+                alert('Camera toegang geweigerd: ' + err);
+            });
+
+            gameState.codeReader = codeReader;
         }
 
         function handleScan(data) {
@@ -977,13 +989,10 @@
         }
 
         function stopScanning() {
-            gameState.scanning = false;
-            var video = document.getElementById('video');
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(function(track) {
-                    track.stop();
-                });
+            if (gameState.targetCodeReader) {
+                gameState.targetCodeReader.reset();
             }
+            gameState.scanning = false;
             showScreen('playerGameScreen');
         }
 
