@@ -882,4 +882,220 @@
         }
 
         function handleScan(data) {
-            var targetNumber = parseInt(data.
+            var targetNumber = parseInt(data.replace('PLAYER_', ''));
+            
+            if (!targetNumber || targetNumber < 1 || targetNumber > TOTAL_NUMBERS) {
+                showMessage('Ongeldige QR code!', 'error');
+                return;
+            }
+            
+            if (targetNumber === gameState.currentPlayer.number) {
+                showMessage('Je kunt jezelf niet raken!', 'error');
+                return;
+            }
+            
+            var targetTeam = getTeam(targetNumber);
+            
+            if (targetTeam === gameState.currentPlayer.team) {
+                showMessage('Niet op je eigen team schieten!', 'error');
+                return;
+            }
+            
+            if (gameState.currentPlayer.scannedNumbers.indexOf(targetNumber) !== -1) {
+                showMessage('Je hebt nummer ' + targetNumber + ' al gescand!', 'info');
+                return;
+            }
+            
+            gameState.currentPlayer.hits++;
+            gameState.currentPlayer.score += 10;
+            gameState.currentPlayer.scannedNumbers.push(targetNumber);
+            
+            loadGameState();
+            var targetPlayer = gameState.players[targetNumber];
+            if (targetPlayer) {
+                if (!targetPlayer.deaths) {
+                    targetPlayer.deaths = 0;
+                }
+                targetPlayer.deaths++;
+                targetPlayer.lastHitTime = Date.now();
+                gameState.players[targetNumber] = targetPlayer;
+            }
+            
+            gameState.players[gameState.currentPlayer.number] = gameState.currentPlayer;
+            saveGameState();
+            
+            stopScanning();
+            updatePlayerScreen();
+            
+            var successDiv = document.createElement('div');
+            successDiv.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(16, 185, 129, 0.95); padding: 40px; border-radius: 20px; z-index: 9999; text-align: center; font-size: 2em; font-weight: bold;';
+            if (targetPlayer) {
+                successDiv.innerHTML = '🎯 HIT!<br>+10 PUNTEN<br><br>Je raakte:<br>' + targetPlayer.name + '<br>(Nummer ' + targetNumber + ')';
+            } else {
+                successDiv.innerHTML = '🎯 HIT!<br>+10 PUNTEN<br><br>Nummer ' + targetNumber + '<br>(Team ' + targetTeam + ')';
+            }
+            document.body.appendChild(successDiv);
+            
+            setTimeout(function() {
+                if (document.body.contains(successDiv)) {
+                    document.body.removeChild(successDiv);
+                }
+            }, 2500);
+        }
+
+        function stopScanning() {
+            gameState.scanning = false;
+            var video = document.getElementById('video');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(function(track) {
+                    track.stop();
+                });
+            }
+            showScreen('playerGameScreen');
+        }
+
+        function logoutPlayer() {
+            if (confirm('Wil je uitloggen? Je nummer wordt VRIJGEGEVEN en iemand anders kan het gebruiken.')) {
+                var myNumber = gameState.currentPlayer.number;
+                
+                delete gameState.players[myNumber];
+                localStorage.setItem('lasergame_global', JSON.stringify(gameState.players));
+                
+                if (gameState.cooldownInterval) {
+                    clearInterval(gameState.cooldownInterval);
+                }
+                
+                gameState.currentPlayer = null;
+                gameState.cooldownActive = false;
+                document.getElementById('cooldownScreen').classList.add('hidden');
+                localStorage.removeItem('lasergame_current_player');
+                
+                alert('Je bent uitgelogd! Je nummer is nu vrij.');
+                backToMode();
+            }
+        }
+
+        function checkIfHit() {
+            if (!gameState.currentPlayer) return;
+            
+            loadGameState();
+            var myData = gameState.players[gameState.currentPlayer.number];
+            
+            if (myData && myData.lastHitTime) {
+                var timeSinceHit = Date.now() - myData.lastHitTime;
+                
+                if (timeSinceHit < 30000 && !gameState.cooldownActive) {
+                    var timeLeft = Math.ceil((30000 - timeSinceHit) / 1000);
+                    startCooldownWithTime(timeLeft);
+                    
+                    gameState.currentPlayer.deaths = myData.deaths;
+                    updatePlayerScreen();
+                }
+            }
+        }
+
+        function startCooldownWithTime(seconds) {
+            gameState.cooldownActive = true;
+            var cooldownScreen = document.getElementById('cooldownScreen');
+            var cooldownTimer = document.getElementById('cooldownTimer');
+            cooldownScreen.classList.remove('hidden');
+            
+            var timeLeft = seconds;
+            cooldownTimer.textContent = timeLeft;
+            
+            if (gameState.cooldownInterval) {
+                clearInterval(gameState.cooldownInterval);
+            }
+            
+            gameState.cooldownInterval = setInterval(function() {
+                timeLeft--;
+                cooldownTimer.textContent = timeLeft;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(gameState.cooldownInterval);
+                    gameState.cooldownActive = false;
+                    cooldownScreen.classList.add('hidden');
+                    showMessage('✅ Je kunt weer scannen!', 'success');
+                }
+            }, 1000);
+        }
+
+        function refreshScoreboard() {
+            loadGameState();
+            
+            var teamAScore = 0;
+            var teamBScore = 0;
+            var teamAPlayers = [];
+            var teamBPlayers = [];
+            
+            Object.values(gameState.players).forEach(function(player) {
+                if (player.team === 'A') {
+                    teamAScore += player.score;
+                    teamAPlayers.push(player);
+                } else {
+                    teamBScore += player.score;
+                    teamBPlayers.push(player);
+                }
+            });
+            
+            document.getElementById('adminTeamAScore').textContent = teamAScore;
+            document.getElementById('adminTeamBScore').textContent = teamBScore;
+            
+            teamAPlayers.sort(function(a, b) { return b.score - a.score; });
+            teamBPlayers.sort(function(a, b) { return b.score - a.score; });
+            
+            var teamADiv = document.getElementById('adminTeamAPlayers');
+            teamADiv.innerHTML = '';
+            teamAPlayers.forEach(function(player) {
+                teamADiv.innerHTML += 
+                    '<div class="player-row">' +
+                        '<div class="player-row-info">' +
+                            '<div class="player-row-number">' + player.number + '</div>' +
+                            '<div class="player-row-name">' + player.name + '</div>' +
+                        '</div>' +
+                        '<div class="player-row-score">' + player.score + ' pts</div>' +
+                    '</div>';
+            });
+            
+            var teamBDiv = document.getElementById('adminTeamBPlayers');
+            teamBDiv.innerHTML = '';
+            teamBPlayers.forEach(function(player) {
+                teamBDiv.innerHTML += 
+                    '<div class="player-row">' +
+                        '<div class="player-row-info">' +
+                            '<div class="player-row-number">' + player.number + '</div>' +
+                            '<div class="player-row-name">' + player.name + '</div>' +
+                        '</div>' +
+                        '<div class="player-row-score">' + player.score + ' pts</div>' +
+                    '</div>';
+            });
+        }
+
+        function resetAllGame() {
+            if (confirm('WAARSCHUWING: Dit wist ALLE spelers en scores! Weet je het zeker?')) {
+                if (confirm('Laatste kans! Echt alle data verwijderen?')) {
+                    localStorage.clear();
+                    gameState = {
+                        players: {},
+                        currentPlayer: null,
+                        scanning: false,
+                        cooldownActive: false,
+                        cooldownInterval: null,
+                        registeringNumber: null
+                    };
+                    alert('Spel volledig gereset!');
+                    backToMode();
+                }
+            }
+        }
+
+        loadGameState();
+        
+        setInterval(function() {
+            if (gameState.currentPlayer) {
+                checkIfHit();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
