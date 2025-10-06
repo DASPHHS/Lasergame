@@ -475,7 +475,9 @@
             show('adminScreen');
             updateAdmin();
             if (game.adminInt) clearInterval(game.adminInt);
-            game.adminInt = setInterval(updateAdmin, 2000);
+            game.adminInt = setInterval(function() {
+                updateAdmin();
+            }, 1000);
         }
 
         function gotoPrint() {
@@ -553,7 +555,8 @@
                 score: 0,
                 hits: 0,
                 deaths: 0,
-                scanned: []
+                scanned: [],
+                lastHit: null
             };
             game.players[num] = game.me;
             save();
@@ -628,11 +631,6 @@
                 show('gameScreen');
                 return;
             }
-            if (game.me.scanned.indexOf(num) !== -1) {
-                msg('Al gescand!', 'error');
-                show('gameScreen');
-                return;
-            }
 
             load();
             var target = game.players[num];
@@ -640,7 +638,8 @@
             if (target && target.lastHit) {
                 var timeSince = Date.now() - target.lastHit;
                 if (timeSince < 30000) {
-                    msg('Target is in cooldown! Nog ' + Math.ceil((30000 - timeSince) / 1000) + ' sec', 'error');
+                    var secLeft = Math.ceil((30000 - timeSince) / 1000);
+                    msg('⏱️ Speler in cooldown! Nog ' + secLeft + ' seconden', 'error');
                     show('gameScreen');
                     return;
                 }
@@ -648,13 +647,23 @@
 
             game.me.hits++;
             game.me.score += 10;
-            game.me.scanned.push(num);
 
             if (target) {
                 if (!target.deaths) target.deaths = 0;
                 target.deaths++;
                 target.lastHit = Date.now();
                 game.players[num] = target;
+            } else {
+                game.players[num] = {
+                    number: num,
+                    name: 'Nummer ' + num,
+                    team: targetTeam,
+                    score: 0,
+                    hits: 0,
+                    deaths: 1,
+                    lastHit: Date.now(),
+                    scanned: []
+                };
             }
             
             game.players[game.me.number] = game.me;
