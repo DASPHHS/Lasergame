@@ -409,6 +409,67 @@
             font-weight: bold;
         }
 
+        .player-management-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+
+        .player-management-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .player-management-number {
+            font-size: 1.3em;
+            font-weight: bold;
+            background: rgba(255, 255, 255, 0.2);
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .player-management-details {
+            font-size: 1em;
+        }
+
+        .player-management-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .player-management-stats {
+            font-size: 0.85em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-small:hover {
+            transform: scale(1.05);
+        }
+
+        .btn-remove {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+        }
+
         @media print {
             body {
                 background: white;
@@ -517,10 +578,15 @@
 
             <button class="btn btn-primary" onclick="startScanning()">🎯 Scan Tegenstander</button>
             <button class="btn btn-secondary" onclick="logoutPlayer()">← Uitloggen</button>
+            <button class="btn btn-danger" onclick="removeSelfFromGame()">🗑️ Verwijder Mij uit Spel</button>
         </div>
 
         <div id="scanScreen" class="card hidden">
             <h2 style="margin-bottom: 20px; text-align: center;">🎯 Richt op QR code!</h2>
+            <div id="scanDebug" style="background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em; text-align: center;">
+                <div>Status: <span id="scanStatus">Wachten op camera...</span></div>
+                <div>Laatste scan: <span id="lastScan">Nog geen scan</span></div>
+            </div>
             <div id="videoContainer">
                 <video id="video" autoplay playsinline muted></video>
                 <div class="scan-overlay"></div>
@@ -647,6 +713,8 @@
             var select = document.getElementById('playerNumberSelect');
             select.innerHTML = '<option value="">-- Kies je nummer --</option>';
             
+            loadGameState();
+            
             for (var i = 1; i <= TOTAL_NUMBERS; i++) {
                 var option = document.createElement('option');
                 option.value = i;
@@ -654,8 +722,7 @@
                 option.textContent = 'Nummer ' + i + ' - Team ' + team + (team === 'A' ? ' (Rood)' : ' (Blauw)');
                 
                 if (gameState.players[i]) {
-                    option.disabled = true;
-                    option.textContent += ' (Bezet door ' + gameState.players[i].name + ')';
+                    option.textContent += ' [' + gameState.players[i].name + ' - ' + gameState.players[i].score + ' pts]';
                 }
                 
                 select.appendChild(option);
@@ -717,29 +784,36 @@
                 return;
             }
             
-            if (gameState.players[number]) {
-                alert('Dit nummer is al bezet door ' + gameState.players[number].name);
-                return;
+            loadGameState();
+            
+            if (gameState.players[number] && gameState.players[number].name !== name) {
+                if (!confirm('Nummer ' + number + ' is al bezet door ' + gameState.players[number].name + '. Wil je deze speler overnemen?')) {
+                    return;
+                }
             }
             
             var team = getTeam(number);
             
-            gameState.currentPlayer = {
-                number: number,
-                name: name,
-                team: team,
-                score: 0,
-                hits: 0,
-                deaths: 0,
-                scannedNumbers: []
-            };
+            if (gameState.players[number]) {
+                gameState.currentPlayer = gameState.players[number];
+            } else {
+                gameState.currentPlayer = {
+                    number: number,
+                    name: name,
+                    team: team,
+                    score: 0,
+                    hits: 0,
+                    deaths: 0,
+                    scannedNumbers: []
+                };
+                gameState.players[number] = gameState.currentPlayer;
+            }
             
-            gameState.players[number] = gameState.currentPlayer;
             saveGameState();
             
             showScreen('playerGameScreen');
             updatePlayerScreen();
-            showMessage('Welkom ' + name + '! Je bent nummer ' + number + ' in Team ' + team, 'success');
+            showMessage('Welkom ' + gameState.currentPlayer.name + '! Je bent nummer ' + number + ' in Team ' + team, 'success');
         }
 
         function updatePlayerScreen() {
@@ -771,6 +845,9 @@
             }
 
             showScreen('scanScreen');
+            document.getElementById('scanStatus').textContent = 'Camera starten...';
+            document.getElementById('lastScan').textContent = 'Nog geen scan';
+            
             var video = document.getElementById('video');
             var canvas = document.getElementById('canvas');
             var ctx = canvas.getContext('2d');
@@ -785,12 +862,19 @@
                 return navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' }
                 });
+            }).catch(function() {
+                return navigator.mediaDevices.getUserMedia({ 
+                    video: true
+                });
             }).then(function(stream) {
                 video.srcObject = stream;
                 video.play();
+                document.getElementById('scanStatus').textContent = 'Camera actief - Zoek QR code...';
                 scan();
             }).catch(function(err) {
-                alert('Camera toegang geweigerd');
+                console.error('Camera error:', err);
+                document.getElementById('scanStatus').textContent = 'FOUT: ' + err.message;
+                alert('Camera toegang geweigerd: ' + err.message);
                 showScreen('playerGameScreen');
             });
 
@@ -805,9 +889,16 @@
                     var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     var code = jsQR(imageData.data, imageData.width, imageData.height);
                     
-                    if (code && code.data.indexOf('PLAYER_') === 0) {
-                        handleScan(code.data);
-                        return;
+                    if (code) {
+                        document.getElementById('lastScan').textContent = code.data;
+                        
+                        if (code.data.indexOf('PLAYER_') === 0) {
+                            document.getElementById('scanStatus').textContent = '✅ QR Code gevonden!';
+                            handleScan(code.data);
+                            return;
+                        } else {
+                            document.getElementById('scanStatus').textContent = 'Ongeldige QR (niet van dit spel)';
+                        }
                     }
                 }
                 
@@ -816,41 +907,64 @@
         }
 
         function handleScan(data) {
+            console.log('Scan ontvangen:', data);
+            document.getElementById('scanStatus').textContent = 'Scan verwerken...';
+            
             var targetNumber = parseInt(data.replace('PLAYER_', ''));
+            console.log('Target nummer:', targetNumber);
             
             if (!targetNumber || targetNumber < 1 || targetNumber > TOTAL_NUMBERS) {
+                console.log('Ongeldige nummer');
                 showMessage('Ongeldige QR code!', 'error');
-                setTimeout(function() { startScanning(); }, 1500);
+                setTimeout(function() { 
+                    document.getElementById('scanStatus').textContent = 'Camera actief - Zoek QR code...';
+                }, 1500);
                 return;
             }
             
             if (targetNumber === gameState.currentPlayer.number) {
+                console.log('Jezelf gescand');
                 showMessage('Je kunt jezelf niet raken!', 'error');
-                setTimeout(function() { startScanning(); }, 1500);
+                setTimeout(function() { 
+                    document.getElementById('scanStatus').textContent = 'Camera actief - Zoek QR code...';
+                }, 1500);
                 return;
             }
             
+            console.log('Laden gameState...');
             loadGameState();
             var targetPlayer = gameState.players[targetNumber];
+            console.log('Target speler:', targetPlayer);
             
             if (!targetPlayer) {
+                console.log('Speler niet aangemeld');
                 showMessage('Nummer ' + targetNumber + ' heeft zich nog niet aangemeld!', 'error');
-                setTimeout(function() { startScanning(); }, 1500);
+                setTimeout(function() { 
+                    document.getElementById('scanStatus').textContent = 'Camera actief - Zoek QR code...';
+                }, 1500);
                 return;
             }
             
+            console.log('Mijn team:', gameState.currentPlayer.team, 'Target team:', targetPlayer.team);
             if (targetPlayer.team === gameState.currentPlayer.team) {
+                console.log('Eigen team');
                 showMessage('Niet op je eigen team schieten!', 'error');
-                setTimeout(function() { startScanning(); }, 1500);
+                setTimeout(function() { 
+                    document.getElementById('scanStatus').textContent = 'Camera actief - Zoek QR code...';
+                }, 1500);
                 return;
             }
             
             if (gameState.currentPlayer.scannedNumbers.indexOf(targetNumber) !== -1) {
+                console.log('Al eerder gescand');
                 showMessage('Je hebt ' + targetPlayer.name + ' al geraakt eerder!', 'info');
-                setTimeout(function() { startScanning(); }, 1500);
+                setTimeout(function() { 
+                    document.getElementById('scanStatus').textContent = 'Camera actief - Zoek QR code...';
+                }, 1500);
                 return;
             }
             
+            console.log('HIT! Punten toekennen...');
             gameState.currentPlayer.hits++;
             gameState.currentPlayer.score += 10;
             gameState.currentPlayer.scannedNumbers.push(targetNumber);
@@ -865,6 +979,7 @@
             gameState.players[targetNumber] = targetPlayer;
             saveGameState();
             
+            console.log('Game state opgeslagen');
             stopScanning();
             updatePlayerScreen();
             
@@ -874,8 +989,12 @@
             document.body.appendChild(successDiv);
             
             setTimeout(function() {
-                document.body.removeChild(successDiv);
+                if (document.body.contains(successDiv)) {
+                    document.body.removeChild(successDiv);
+                }
             }, 2500);
+            
+            console.log('Scan compleet!');
         }
 
         function notifyTarget(targetNumber) {
@@ -955,6 +1074,88 @@
                 document.getElementById('cooldownScreen').classList.add('hidden');
                 localStorage.removeItem('lasergame_current_player');
                 backToMode();
+            }
+        }
+
+        function removeSelfFromGame() {
+            if (confirm('Weet je zeker dat je jezelf uit het spel wilt verwijderen? Al je punten worden gewist en je nummer wordt vrijgegeven.')) {
+                if (confirm('Laatste bevestiging: Echt verwijderen?')) {
+                    var myNumber = gameState.currentPlayer.number;
+                    
+                    delete gameState.players[myNumber];
+                    saveGameState();
+                    
+                    if (gameState.cooldownInterval) {
+                        clearInterval(gameState.cooldownInterval);
+                    }
+                    
+                    gameState.currentPlayer = null;
+                    gameState.cooldownActive = false;
+                    document.getElementById('cooldownScreen').classList.add('hidden');
+                    localStorage.removeItem('lasergame_current_player');
+                    
+                    alert('Je bent verwijderd uit het spel. Je kunt je opnieuw aanmelden met een nieuw nummer.');
+                    backToMode();
+                }
+            }
+        }
+
+        function showPlayerManagement() {
+            loadGameState();
+            
+            var list = document.getElementById('playerManagementList');
+            list.innerHTML = '';
+            
+            if (Object.keys(gameState.players).length === 0) {
+                list.innerHTML = '<p style="text-align: center; color: rgba(255,255,255,0.7);">Nog geen spelers aangemeld.</p>';
+            } else {
+                var sortedPlayers = Object.values(gameState.players).sort(function(a, b) {
+                    return a.number - b.number;
+                });
+                
+                sortedPlayers.forEach(function(player) {
+                    var teamClass = player.team === 'A' ? 'team-a' : 'team-b';
+                    var teamLabel = player.team === 'A' ? 'Team A (Rood)' : 'Team B (Blauw)';
+                    
+                    var item = document.createElement('div');
+                    item.className = 'player-management-item';
+                    item.innerHTML = 
+                        '<div class="player-management-info">' +
+                            '<div class="player-management-number">' + player.number + '</div>' +
+                            '<div class="player-management-details">' +
+                                '<div class="player-management-name">' + player.name + '</div>' +
+                                '<div class="player-management-stats">' +
+                                    teamLabel + ' • ' +
+                                    player.score + ' punten • ' +
+                                    player.hits + ' hits • ' +
+                                    (player.deaths || 0) + ' geraakt' +
+                                '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<button class="btn-small btn-remove" onclick="removePlayer(' + player.number + ')">🗑️ Verwijder</button>';
+                    
+                    list.appendChild(item);
+                });
+            }
+            
+            showTab('playerManagement');
+        }
+
+        function removePlayer(playerNumber) {
+            loadGameState();
+            var player = gameState.players[playerNumber];
+            
+            if (!player) {
+                alert('Speler niet gevonden!');
+                return;
+            }
+            
+            if (confirm('Wil je ' + player.name + ' (nummer ' + playerNumber + ') verwijderen uit het spel?')) {
+                delete gameState.players[playerNumber];
+                saveGameState();
+                
+                alert('Speler verwijderd! Nummer ' + playerNumber + ' is nu beschikbaar.');
+                showPlayerManagement();
             }
         }
 
