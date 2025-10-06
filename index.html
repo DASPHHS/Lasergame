@@ -86,8 +86,9 @@
         }
 
         .player-stats {
-            display: flex;
-            justify-content: space-around;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
             margin: 25px 0;
         }
 
@@ -104,6 +105,31 @@
             font-size: 0.9em;
             color: rgba(255, 255, 255, 0.7);
             margin-top: 5px;
+        }
+
+        .cooldown-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(239, 68, 68, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .cooldown-timer {
+            font-size: 8em;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        .cooldown-text {
+            font-size: 1.5em;
+            text-align: center;
         }
 
         .btn {
@@ -482,6 +508,10 @@
                         <div class="stat-value" id="playerHits">0</div>
                         <div class="stat-label">Hits</div>
                     </div>
+                    <div class="stat">
+                        <div class="stat-value" id="playerDeaths">0</div>
+                        <div class="stat-label">Geraakt</div>
+                    </div>
                 </div>
             </div>
 
@@ -490,13 +520,21 @@
         </div>
 
         <div id="scanScreen" class="card hidden">
-            <h2 style="margin-bottom: 20px; text-align: center;">🎯 Richt op de QR code op de rug!</h2>
+            <h2 style="margin-bottom: 20px; text-align: center;">🎯 Richt op QR code!</h2>
             <div id="videoContainer">
-                <video id="video" autoplay playsinline></video>
+                <video id="video" autoplay playsinline muted></video>
                 <div class="scan-overlay"></div>
             </div>
             <canvas id="canvas"></canvas>
+            <div style="text-align: center; margin-top: 20px; font-size: 1.1em; color: rgba(255,255,255,0.8);">
+                Zoek een tegenstander en scan zijn QR code!
+            </div>
             <button class="btn btn-secondary" onclick="stopScanning()" style="margin-top: 20px;">← Stop Scannen</button>
+        </div>
+
+        <div id="cooldownScreen" class="cooldown-overlay hidden">
+            <div class="cooldown-timer" id="cooldownTimer">30</div>
+            <div class="cooldown-text">💀 Je bent geraakt!<br>Wacht tot je weer kunt scannen...</div>
         </div>
 
         <div id="adminScreen" class="card hidden">
@@ -535,7 +573,9 @@
         var gameState = {
             players: {},
             currentPlayer: null,
-            scanning: false
+            scanning: false,
+            cooldownActive: false,
+            cooldownInterval: null
         };
 
         function getTeam(number) {
@@ -627,6 +667,7 @@
             
             if (mode === 'player') {
                 if (gameState.currentPlayer) {
+                    checkIfHit();
                     showScreen('playerGameScreen');
                     updatePlayerScreen();
                 } else {
@@ -689,6 +730,7 @@
                 team: team,
                 score: 0,
                 hits: 0,
+                deaths: 0,
                 scannedNumbers: []
             };
             
@@ -711,6 +753,7 @@
             
             document.getElementById('playerScore').textContent = p.score;
             document.getElementById('playerHits').textContent = p.hits;
+            document.getElementById('playerDeaths').textContent = p.deaths || 0;
         }
 
         function showMessage(message, type) {
@@ -722,6 +765,11 @@
         }
 
         function startScanning() {
+            if (gameState.cooldownActive) {
+                alert('Je bent in cooldown! Wacht tot je weer kunt scannen.');
+                return;
+            }
+
             showScreen('scanScreen');
             var video = document.getElementById('video');
             var canvas = document.getElementById('canvas');
@@ -730,7 +778,13 @@
             gameState.scanning = true;
 
             navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment' } 
+                video: { 
+                    facingMode: { exact: 'environment' }
+                } 
+            }).catch(function() {
+                return navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' }
+                });
             }).then(function(stream) {
                 video.srcObject = stream;
                 video.play();
@@ -766,27 +820,34 @@
             
             if (!targetNumber || targetNumber < 1 || targetNumber > TOTAL_NUMBERS) {
                 showMessage('Ongeldige QR code!', 'error');
+                setTimeout(function() { startScanning(); }, 1500);
                 return;
             }
             
             if (targetNumber === gameState.currentPlayer.number) {
                 showMessage('Je kunt jezelf niet raken!', 'error');
+                setTimeout(function() { startScanning(); }, 1500);
                 return;
             }
             
+            loadGameState();
             var targetPlayer = gameState.players[targetNumber];
+            
             if (!targetPlayer) {
                 showMessage('Nummer ' + targetNumber + ' heeft zich nog niet aangemeld!', 'error');
+                setTimeout(function() { startScanning(); }, 1500);
                 return;
             }
             
             if (targetPlayer.team === gameState.currentPlayer.team) {
                 showMessage('Niet op je eigen team schieten!', 'error');
+                setTimeout(function() { startScanning(); }, 1500);
                 return;
             }
             
             if (gameState.currentPlayer.scannedNumbers.indexOf(targetNumber) !== -1) {
-                showMessage('Je hebt ' + targetPlayer.name + ' al geraakt!', 'info');
+                showMessage('Je hebt ' + targetPlayer.name + ' al geraakt eerder!', 'info');
+                setTimeout(function() { startScanning(); }, 1500);
                 return;
             }
             
@@ -794,12 +855,83 @@
             gameState.currentPlayer.score += 10;
             gameState.currentPlayer.scannedNumbers.push(targetNumber);
             
+            if (!targetPlayer.deaths) {
+                targetPlayer.deaths = 0;
+            }
+            targetPlayer.deaths++;
+            targetPlayer.lastHitTime = Date.now();
+            
             gameState.players[gameState.currentPlayer.number] = gameState.currentPlayer;
+            gameState.players[targetNumber] = targetPlayer;
             saveGameState();
             
             stopScanning();
             updatePlayerScreen();
-            showMessage('🎯 HIT! +10 punten! Je raakte ' + targetPlayer.name + ' (nummer ' + targetNumber + ')!', 'success');
+            
+            var successDiv = document.createElement('div');
+            successDiv.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(16, 185, 129, 0.95); padding: 40px; border-radius: 20px; z-index: 9999; text-align: center; font-size: 2em; font-weight: bold;';
+            successDiv.innerHTML = '🎯 HIT!<br>+10 PUNTEN<br><br>Je raakte:<br>' + targetPlayer.name + '<br>(Nummer ' + targetNumber + ')';
+            document.body.appendChild(successDiv);
+            
+            setTimeout(function() {
+                document.body.removeChild(successDiv);
+            }, 2500);
+        }
+
+        function notifyTarget(targetNumber) {
+            var savedCurrentPlayer = localStorage.getItem('lasergame_current_player');
+            if (savedCurrentPlayer) {
+                var currentPlayer = JSON.parse(savedCurrentPlayer);
+                if (currentPlayer.number === targetNumber) {
+                    startCooldown();
+                }
+            }
+        }
+
+        function checkIfHit() {
+            if (!gameState.currentPlayer) return;
+            
+            loadGameState();
+            var myData = gameState.players[gameState.currentPlayer.number];
+            
+            if (myData && myData.lastHitTime) {
+                var timeSinceHit = Date.now() - myData.lastHitTime;
+                
+                if (timeSinceHit < 30000 && !gameState.cooldownActive) {
+                    var timeLeft = Math.ceil((30000 - timeSinceHit) / 1000);
+                    startCooldownWithTime(timeLeft);
+                }
+            }
+        }
+
+        function startCooldown() {
+            startCooldownWithTime(30);
+        }
+
+        function startCooldownWithTime(seconds) {
+            gameState.cooldownActive = true;
+            var cooldownScreen = document.getElementById('cooldownScreen');
+            var cooldownTimer = document.getElementById('cooldownTimer');
+            cooldownScreen.classList.remove('hidden');
+            
+            var timeLeft = seconds;
+            cooldownTimer.textContent = timeLeft;
+            
+            if (gameState.cooldownInterval) {
+                clearInterval(gameState.cooldownInterval);
+            }
+            
+            gameState.cooldownInterval = setInterval(function() {
+                timeLeft--;
+                cooldownTimer.textContent = timeLeft;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(gameState.cooldownInterval);
+                    gameState.cooldownActive = false;
+                    cooldownScreen.classList.add('hidden');
+                    showMessage('✅ Je kunt weer scannen!', 'success');
+                }
+            }, 1000);
         }
 
         function stopScanning() {
@@ -815,7 +947,12 @@
 
         function logoutPlayer() {
             if (confirm('Wil je uitloggen? Je score blijft bewaard.')) {
+                if (gameState.cooldownInterval) {
+                    clearInterval(gameState.cooldownInterval);
+                }
                 gameState.currentPlayer = null;
+                gameState.cooldownActive = false;
+                document.getElementById('cooldownScreen').classList.add('hidden');
                 localStorage.removeItem('lasergame_current_player');
                 backToMode();
             }
@@ -888,6 +1025,12 @@
         }
 
         loadGameState();
+        
+        setInterval(function() {
+            if (gameState.currentPlayer) {
+                checkIfHit();
+            }
+        }, 2000);
     </script>
 </body>
 </html>
