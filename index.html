@@ -476,6 +476,9 @@
             <p style="margin-bottom: 20px; color: rgba(255,255,255,0.8); text-align: center;">
                 Scan de QR code die op JOUW rug hangt om je aan te melden
             </p>
+            <div style="background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-size: 0.9em;">
+                <div id="scanDebugReg">Status: Camera laden...</div>
+            </div>
             <div id="videoContainer">
                 <video id="videoReg" autoplay playsinline muted></video>
                 <div class="scan-overlay"></div>
@@ -694,6 +697,8 @@
 
         function startRegistration() {
             showScreen('registerScreen');
+            document.getElementById('scanDebugReg').textContent = 'Camera starten...';
+            
             var video = document.getElementById('videoReg');
             var canvas = document.getElementById('canvasReg');
             var ctx = canvas.getContext('2d');
@@ -702,22 +707,20 @@
 
             navigator.mediaDevices.getUserMedia({ 
                 video: { 
-                    facingMode: { exact: 'environment' }
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 } 
-            }).catch(function() {
-                return navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' }
-                });
-            }).catch(function() {
-                return navigator.mediaDevices.getUserMedia({ 
-                    video: true
-                });
             }).then(function(stream) {
                 video.srcObject = stream;
+                video.setAttribute('playsinline', true);
                 video.play();
+                document.getElementById('scanDebugReg').textContent = 'Camera actief! Richt op QR code...';
                 scanRegister();
             }).catch(function(err) {
-                alert('Camera toegang geweigerd');
+                console.error('Camera error:', err);
+                document.getElementById('scanDebugReg').textContent = 'FOUT: ' + err.message;
+                alert('Camera toegang geweigerd: ' + err.message);
                 showScreen('modeScreen');
             });
 
@@ -727,14 +730,32 @@
                 if (video.readyState === video.HAVE_ENOUGH_DATA) {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     
-                    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    var code = jsQR(imageData.data, imageData.width, imageData.height);
-                    
-                    if (code && code.data.indexOf('PLAYER_') === 0) {
-                        handleRegistrationScan(code.data);
-                        return;
+                    if (canvas.width > 0 && canvas.height > 0) {
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        
+                        try {
+                            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                            var code = jsQR(imageData.data, imageData.width, imageData.height, {
+                                inversionAttempts: "dontInvert"
+                            });
+                            
+                            if (code && code.data) {
+                                console.log('QR gevonden:', code.data);
+                                document.getElementById('scanDebugReg').textContent = 'Gevonden: ' + code.data;
+                                if (code.data.indexOf('PLAYER_') === 0) {
+                                    handleRegistrationScan(code.data);
+                                    return;
+                                } else {
+                                    document.getElementById('scanDebugReg').textContent = 'Ongeldige QR - niet van dit spel';
+                                }
+                            }
+                        } catch(e) {
+                            console.error('Scan error:', e);
+                            document.getElementById('scanDebugReg').textContent = 'Scan fout: ' + e.message;
+                        }
+                    } else {
+                        document.getElementById('scanDebugReg').textContent = 'Wachten op video... ' + canvas.width + 'x' + canvas.height;
                     }
                 }
                 
@@ -866,14 +887,26 @@
                 if (video.readyState === video.HAVE_ENOUGH_DATA) {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     
-                    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    var code = jsQR(imageData.data, imageData.width, imageData.height);
-                    
-                    if (code && code.data.indexOf('PLAYER_') === 0) {
-                        handleScan(code.data);
-                        return;
+                    if (canvas.width > 0 && canvas.height > 0) {
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        
+                        try {
+                            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                            var code = jsQR(imageData.data, imageData.width, imageData.height, {
+                                inversionAttempts: "dontInvert"
+                            });
+                            
+                            if (code && code.data) {
+                                console.log('QR gevonden:', code.data);
+                                if (code.data.indexOf('PLAYER_') === 0) {
+                                    handleScan(code.data);
+                                    return;
+                                }
+                            }
+                        } catch(e) {
+                            console.error('Scan error:', e);
+                        }
                     }
                 }
                 
