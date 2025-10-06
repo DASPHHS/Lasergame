@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QR Lasergame</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -476,14 +476,7 @@
             <p style="margin-bottom: 20px; color: rgba(255,255,255,0.8); text-align: center;">
                 Richt de camera op de QR code die op JOUW rug hangt
             </p>
-            <div style="background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-size: 0.9em;">
-                <div id="scanDebugReg">Wachten op camera...</div>
-            </div>
-            <div id="videoContainer">
-                <video id="videoReg" autoplay playsinline muted></video>
-                <div class="scan-overlay"></div>
-            </div>
-            <canvas id="canvasReg"></canvas>
+            <div id="qr-reader-reg" style="width: 100%; max-width: 500px; margin: 0 auto;"></div>
             <button class="btn btn-secondary" onclick="stopRegistration()" style="margin-top: 20px;">← Terug</button>
         </div>
 
@@ -532,14 +525,7 @@
             <p style="margin-bottom: 20px; color: rgba(255,255,255,0.8); text-align: center;">
                 Richt de camera op de QR code op de rug van een tegenstander
             </p>
-            <div style="background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-size: 0.9em;">
-                <div id="scanDebugTarget">Wachten op camera...</div>
-            </div>
-            <div id="videoContainer">
-                <video id="video" autoplay playsinline muted></video>
-                <div class="scan-overlay"></div>
-            </div>
-            <canvas id="canvas"></canvas>
+            <div id="qr-reader-target" style="width: 100%; max-width: 500px; margin: 0 auto;"></div>
             <button class="btn btn-secondary" onclick="stopScanning()" style="margin-top: 20px;">← Stop Scannen</button>
         </div>
 
