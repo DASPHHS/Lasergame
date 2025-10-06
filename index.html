@@ -564,14 +564,21 @@
 
         function updateGame() {
             if (!game.me) return;
+            
+            load();
+            var updated = game.players[game.me.number];
+            if (updated) {
+                game.me = updated;
+            }
+            
             var p = game.me;
             document.getElementById('teamBadge').textContent = 'Team ' + p.team;
             document.getElementById('teamBadge').className = 'team-badge team-' + p.team.toLowerCase();
             document.getElementById('playerName').textContent = p.name;
             document.getElementById('playerNum').textContent = p.number;
-            document.getElementById('score').textContent = p.score;
-            document.getElementById('hits').textContent = p.hits;
-            document.getElementById('deaths').textContent = p.deaths;
+            document.getElementById('score').textContent = p.score || 0;
+            document.getElementById('hits').textContent = p.hits || 0;
+            document.getElementById('deaths').textContent = p.deaths || 0;
         }
 
         function startScan() {
@@ -627,18 +634,29 @@
                 return;
             }
 
+            load();
+            var target = game.players[num];
+            
+            if (target && target.lastHit) {
+                var timeSince = Date.now() - target.lastHit;
+                if (timeSince < 30000) {
+                    msg('Target is in cooldown! Nog ' + Math.ceil((30000 - timeSince) / 1000) + ' sec', 'error');
+                    show('gameScreen');
+                    return;
+                }
+            }
+
             game.me.hits++;
             game.me.score += 10;
             game.me.scanned.push(num);
 
-            load();
-            var target = game.players[num];
             if (target) {
                 if (!target.deaths) target.deaths = 0;
                 target.deaths++;
                 target.lastHit = Date.now();
                 game.players[num] = target;
             }
+            
             game.players[game.me.number] = game.me;
             save();
 
@@ -647,11 +665,11 @@
             
             var hitMsg = document.createElement('div');
             hitMsg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(16,185,129,0.95);padding:40px;border-radius:20px;z-index:9999;text-align:center;font-size:2em;font-weight:bold;';
-            hitMsg.innerHTML = '🎯 HIT!<br>+10 PTS<br><br>' + (target ? target.name : 'Nr ' + num);
+            hitMsg.innerHTML = '🎯 HIT!<br>+10 PUNTEN!<br><br>' + (target ? target.name : 'Nummer ' + num) + '<br><br>Jouw score: ' + game.me.score;
             document.body.appendChild(hitMsg);
             setTimeout(function() {
                 if (document.body.contains(hitMsg)) document.body.removeChild(hitMsg);
-            }, 2500);
+            }, 3000);
         }
 
         function stopScan() {
@@ -702,8 +720,17 @@
                     var left = Math.ceil((30000 - diff) / 1000);
                     startCD(left);
                     game.me.deaths = myData.deaths;
+                    game.me.score = myData.score;
+                    game.me.hits = myData.hits;
                     updateGame();
                 }
+            }
+            
+            if (myData) {
+                game.me.score = myData.score || 0;
+                game.me.hits = myData.hits || 0;
+                game.me.deaths = myData.deaths || 0;
+                updateGame();
             }
         }
 
@@ -730,12 +757,15 @@
             var scoreA = 0, scoreB = 0;
             var playersA = [], playersB = [];
             
-            Object.values(game.players).forEach(function(p) {
+            Object.keys(game.players).forEach(function(key) {
+                var p = game.players[key];
+                if (!p || !p.name) return;
+                
                 if (p.team === 'A') {
-                    scoreA += p.score;
+                    scoreA += (p.score || 0);
                     playersA.push(p);
                 } else {
-                    scoreB += p.score;
+                    scoreB += (p.score || 0);
                     playersB.push(p);
                 }
             });
@@ -743,19 +773,27 @@
             document.getElementById('scoreA').textContent = scoreA;
             document.getElementById('scoreB').textContent = scoreB;
 
-            playersA.sort(function(a, b) { return b.score - a.score; });
-            playersB.sort(function(a, b) { return b.score - a.score; });
+            playersA.sort(function(a, b) { return (b.score || 0) - (a.score || 0); });
+            playersB.sort(function(a, b) { return (b.score || 0) - (a.score || 0); });
 
             var htmlA = '';
-            playersA.forEach(function(p) {
-                htmlA += '<div style="padding:8px;margin:5px 0;background:rgba(255,255,255,0.1);border-radius:8px;display:flex;justify-content:space-between;"><span>' + p.number + '. ' + p.name + '</span><span>' + p.score + ' pts</span></div>';
-            });
+            if (playersA.length === 0) {
+                htmlA = '<div style="padding:10px;color:rgba(255,255,255,0.5);">Geen spelers</div>';
+            } else {
+                playersA.forEach(function(p) {
+                    htmlA += '<div style="padding:8px;margin:5px 0;background:rgba(255,255,255,0.1);border-radius:8px;display:flex;justify-content:space-between;"><span>#' + p.number + ' ' + p.name + '</span><span>' + (p.score || 0) + ' pts</span></div>';
+                });
+            }
             document.getElementById('playersA').innerHTML = htmlA;
 
             var htmlB = '';
-            playersB.forEach(function(p) {
-                htmlB += '<div style="padding:8px;margin:5px 0;background:rgba(255,255,255,0.1);border-radius:8px;display:flex;justify-content:space-between;"><span>' + p.number + '. ' + p.name + '</span><span>' + p.score + ' pts</span></div>';
-            });
+            if (playersB.length === 0) {
+                htmlB = '<div style="padding:10px;color:rgba(255,255,255,0.5);">Geen spelers</div>';
+            } else {
+                playersB.forEach(function(p) {
+                    htmlB += '<div style="padding:8px;margin:5px 0;background:rgba(255,255,255,0.1);border-radius:8px;display:flex;justify-content:space-between;"><span>#' + p.number + ' ' + p.name + '</span><span>' + (p.score || 0) + ' pts</span></div>';
+                });
+            }
             document.getElementById('playersB').innerHTML = htmlB;
         }
 
